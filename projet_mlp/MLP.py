@@ -44,22 +44,50 @@ ACTIVATIONS={'identity' : (identity,d_identity) ,'logistic' : (sigmoide,d_sigmoi
 ############################################
 
 def MSE_cost(A,y):
-    return 1/y.shape[1]*np.sum((y-A)**2)
+    m=y.shape[1]
+    return 1/m*np.sum((y-A)**2)
 
 def log_loss(A,y,eps=10**(-15)):  #eps car log n'est pas définie en 0
-    return - 1/y.shape[1]* np.sum(y *np.log(A+eps) + (1 - y) * np.log(1-A+eps))
+    m=y.shape[1]
+    return - 1/m* np.sum(y *np.log(A+eps) + (1 - y) * np.log(1-A+eps))
 
-def d_MSE_cost(A,y): #la somme 1 à m sera faite en produit matriciel (m,n)
-    return 2/y.shape[1]*(A-y)
+def d_MSE_cost_logistic(A,y):
+    '''Retourne la dérivée de la fonction cout * la dérivée de la sigmoide
+       Correspond au dL/dZ de notre modèle
+       La somme de 1 à m sera faite en produit matriciel avec une activation(m,n)'''
+    m=y.shape[1]
+    return 2/m*(A-y)*A*(1-A)
 
-def d_log_loss(A,y,eps=10**(-15)): #la somme de 1 à m sera faite en produit matriciel avec (m,n)
-    return 1/y.shape[1]*(A+eps-y)/((A+eps)*(1-A+eps))
+def d_log_loss_logistic(A,y,eps=10**(-15)):
+    '''Retourne la dérivée de la fonction cout * la dérivée de la sigmoide
+       Correspond au dL/dZ de notre modèle
+       La somme de 1 à m sera faite en produit matriciel avec une activation(m,n)'''
+    m=y.shape[1]
+    #on a simplifié la fraction
+    return 1/m*(A-y) 
 
-COSTS={ 'log_loss':(log_loss,d_log_loss),'MSE': (MSE_cost,d_MSE_cost)}
+COSTS={ 'log_loss':(log_loss,d_log_loss_logistic),'MSE': (MSE_cost,d_MSE_cost_logistic)}
 
 ############################################
 #           GRAPHICS METHODS               #
 ############################################
+
+
+def show_Activations():
+    '''Affiche les 4 fonctions d'activations définies plus haut'''
+    i=0
+    x=np.linspace(-10,10,200)
+    fig, axs = plt.subplots(2,2)
+    fig.set_figheight(8)
+    fig.set_figwidth(12)
+    for nom,a in ACTIVATIONS.items():
+        axs[i%2,i//2].plot(x,a[0](x),label='activation')
+        axs[i%2,i//2].plot(x,a[1](a[0](x)),label='dérivée')
+        axs[i%2,i//2].set_title(f' {nom}')
+        axs[i%2,i//2].legend()
+        axs[i%2,i//2].grid(True)
+        i+=1
+    fig.tight_layout()
 
 def show_learning(nb_iter,couts_A,couts_t,scores_A,scores_t):
     '''Affiche la courbe de couts, d'apprentissage'''
@@ -75,7 +103,6 @@ def show_learning(nb_iter,couts_A,couts_t,scores_A,scores_t):
     axs[0].set_ylabel('cost')
     axs[0].legend()
     #axe 1
-    axs[1].set_ylim(0,1)
     axs[1].plot(nb_iter,scores_A,label='score apprentissage')
     axs[1].plot(nb_iter,scores_t,label='score test')
     axs[1].set_title(f'Learning curve')
@@ -100,7 +127,6 @@ def show_learning2D(nb_iter,couts_A,couts_t,scores_A,scores_t,Xa,ya,Xt,yt,Z,xx, 
     axs[0].set_ylabel('cost')
     axs[0].legend()
     #axe 1
-    axs[1].set_ylim(0,1)
     axs[1].plot(nb_iter,scores_A,label='score apprentissage')
     axs[1].plot(nb_iter,scores_t,label='score test')
     axs[1].set_title(f'Learning curve')
@@ -123,7 +149,7 @@ def show_learning2D(nb_iter,couts_A,couts_t,scores_A,scores_t,Xa,ya,Xt,yt,Z,xx, 
 #           MLP CLASS                      #
 ############################################
 class MLP:
-    def __init__(self,hidden_layers=[],activation='logistic',cost='MSE',random_state=False,learning_rate=0.2,max_iter=50000,momentum=0.9):    
+    def __init__(self,hidden_layers=[],activation='logistic',cost='MSE',random_state=None,learning_rate=0.2,max_iter=50000,momentum=0.9):    
         self.nb_layers=len(hidden_layers)+1
         self.layers=[] 
         self.weights,self.biais=[],[]
@@ -154,8 +180,8 @@ class MLP:
         layers=[X.shape[1]]+self.hidden_layers+[y.shape[1]]
         #update layers
         self.layers=[ (layers[i],layers[i+1]) for i in range(self.nb_layers)]
-        if not(self.random_state):
-            np.random.seed(1)
+        if self.random_state is not None:
+            np.random.seed(self.random_state)
         for (n0,n1) in self.layers:
             weights.append(np.random.randn(n1,n0))
             biais.append(np.random.randn(n1,1))
@@ -163,7 +189,7 @@ class MLP:
 
 
     def forward(self,X):
-        '''Met a jours les activations
+        '''Retourne une liste des activations 
         A[0]=X.T '''
         activations=[X.T]
         for i in range(1,self.nb_layers+1):
@@ -181,29 +207,30 @@ class MLP:
         '''Retourne une liste des gradients de W et de b ou 
         l'indice correspondant à la couche i-1
         '''
-        m=X.shape[0]
-        #nous allons devoir stocker les dL/dZ pour notre rétroPropagation 
-        les_dZ= [COSTS[self.cost][1](self.activations[self.nb_layers],y.T) * ACTIVATIONS[self.activation][1](self.activations[self.nb_layers])] 
+        #nous allons devoir stocker les dL/dZ pour notre rétroPropagation : la derniere couche est une activations sigmoide
+        #donc nous pouvons utiliser nos fonctions d_cost_logistic                                    
+        les_dZ= [COSTS[self.cost][1](self.activations[self.nb_layers],y.T)] 
         #la premiere propagation arriere est sigmoide
         dWs= [les_dZ[0].dot(self.activations[self.nb_layers-1].T)]  
-        dBs=[(1/m if self.cost=='log_loss' else 2/m) * np.sum(les_dZ[0],axis=1,keepdims=True)]
-
+        dBs=[ np.sum(les_dZ[0],axis=1,keepdims=True)]
         for L in range(1,self.nb_layers):
             W=self.weights[self.nb_layers-L]
             b=self.biais[self.nb_layers-L]
             A=self.activations[self.nb_layers-L]
-            dZ= 1/m * (W.T).dot(les_dZ[L-1])*ACTIVATIONS[self.activation][1](A) #dérivée de la fonction activation
+            dZ=  (W.T).dot(les_dZ[L-1])*ACTIVATIONS[self.activation][1](A) #dérivée de la fonction activation
             les_dZ.append(dZ)
-            dWs.insert(0,dZ.dot(self.activations[self.nb_layers-L-1].T))
-            dBs.insert(0,np.sum(dZ,axis=1,keepdims=True))
+            dWs.insert(0,dZ.dot(self.activations[self.nb_layers-L-1].T)) # on insere dans le bon ordre pour que la dW[i] correspondent a W[i]
+            dBs.insert(0,np.sum(dZ,axis=1,keepdims=True)) # on insere dans le bon ordre pour que la db[i] correspondent a W[i]
         return dWs,dBs
 
     def update(self):
-        '''update weights, biais selon le learning_rate et  momentum '''
+        '''update weights, biais selon le learning_rate et  momentum : si momentum est nul descente de gradient classique'''
         for L in range(self.nb_layers):
+            #update momentum
             self.momentum_W[L]=self.momentum*self.momentum_W[L]+self.gradients_W[L]
-            self.weights[L]=self.weights[L]-self.learning_rate*self.momentum_W[L]
             self.momentum_b[L]=self.momentum*self.momentum_b[L]+self.gradients_B[L]
+            #update W,B
+            self.weights[L]=self.weights[L]-self.learning_rate*self.momentum_W[L]
             self.biais[L]=self.biais[L]-self.learning_rate*self.momentum_b[L]
             
 
@@ -218,7 +245,7 @@ class MLP:
 
     def fit(self,X,y):
         '''Fonction qui effectue la propagation avant et arriere en mettant a jours les poids et biais'''
-        self.weights,self.biais=np.array([[ 1.41683865 ,-0.71898376]]),np.array([[-0.52820104]])#self.initWeights(X,y)
+        self.weights,self.biais=self.initWeights(X,y)
         i=0
         self.activations=self.forward(X)
         self.momentum_W,self.momentum_b=  self.backward(X,y) 
@@ -236,19 +263,19 @@ class MLP:
         nb_iter,couts_A,couts_t,scores_A,scores_t=[],[],[],[],[]
         i=0
         self.activations=self.forward(Xa)
-        self.momentum_W,self.momentum_b=  self.backward(Xa,ya)     
+        self.momentum_W,self.momentum_b=  self.backward(Xa,ya)  #initialisation du momentum des poids et du biais   
         while i<self.max_iter:
             self.activations=self.forward(Xa)
             self.gradients_W,self.gradients_B=self.backward(Xa,ya)
             self.update()
             i+=1
-            if i%bins==0:
+            if i%bins==0: #pour réduire les calculs
                 couts_A.append(COSTS[self.cost][0](self.activations[self.nb_layers],ya.T))
                 couts_t.append(COSTS[self.cost][0](self.forward(Xt)[self.nb_layers],yt.T))
                 scores_A.append(self.score(Xa,ya))
                 scores_t.append(self.score(Xt,yt))
                 nb_iter.append((i+1))
-        if Xa.shape[1]==2: # 2D
+        if Xa.shape[1]==2: #si nos données sont à deux variables : on trace la frontiere de décision
             nx, ny = 200, 200
             X=np.concatenate((Xa,Xt),axis=0)
             x_min, x_max = np.min(X[:,0]),np.max(X[:,0])
@@ -267,18 +294,8 @@ class MLP:
 
 
 
-if __name__ == '__main__':
-    Xa, ya = make_circles(n_samples=400, noise=0.10, factor=0.3, random_state=0)
-    Xa=np.concatenate((Xa,Xa+2))
-    Xt, yt = make_circles(n_samples=100, noise=0.10, factor=0.3, random_state=0)
-    Xt=np.concatenate((Xt,Xt+2))
-    ya=np.concatenate((ya,np.where(ya==1,0,1)))
-    yt=np.concatenate((yt,np.where(yt==1,0,1)))
-    ya = ya.reshape(ya.shape[0],1)
-    yt = yt.reshape(yt.shape[0],1)
+
     
-    mlp=MLP(hidden_layers=[32],learning_rate=0.2,max_iter=10000)
-    print(mlp.parameters())
     
 
     
