@@ -21,7 +21,11 @@ class PCA:
         v,w = np.linalg.eig(self.corr)
         self.eigen_values=v
         self.eigen_matrix=w
-        
+        self.inv_eigen_matrix=np.linalg.inv(w)
+
+    def get_inv_eigen_matrix(self):
+        return self.inv_eigen_matrix
+
     def get_eigen_matrix(self):
         return self.eigen_matrix
 
@@ -69,7 +73,12 @@ class PCA:
     def transform(self,n_first_components):
         '''Retoure X transforme et réduit à n_first_components'''
         assert n_first_components <= self.eigen_values.size , f'Le nombre de composantes est plus grande que le nombre de features'
-        projection=(self.eigen_matrix[:,:n_first_components]).T
+        projection=(self.eigen_matrix[:,:n_first_components]).T # les n components premieres colonnes
         return np.dot(projection,(self.X_std).T).T
+
+    def inv_transform(self,X_transformed):
+    	'''Retourne la transformation a sa taille d'origine par la matrice inverse'''
+    	inv_projection=self.inv_eigen_matrix[:X_transformed.shape[1],:]  # les n components premieres lignes 
+    	return np.dot(X_transformed,inv_projection)
 
 
